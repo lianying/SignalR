@@ -9,6 +9,8 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Timer;
+import java.util.TimerTask;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -33,9 +35,36 @@ public class HubConnection {
     private Map<String, String> headers = new HashMap<>();
     private ConnectionState connectionState = null;
     private HttpClient httpClient;
+    private Timer pingTimer = null;
+    private long nextServerTimeout = 0;
+    private long nextPingActivation = 0;
+    private long keepAliveInterval = 15000;
+    private long serverTimeout = 30000;
+    private long tickRate = 1000;
 
     private static ArrayList<Class<?>> emptyArray = new ArrayList<>();
     private static int MAX_NEGOTIATE_ATTEMPTS = 100;
+
+    public void setServerTimeoutInMilliseconds(long serverTimeout) {
+        this.serverTimeout = serverTimeout;
+    }
+
+    public long getServerTimeoutInMilliseconds() {
+        return this.serverTimeout;
+    }
+
+    public void setKeepAliveIntervalInMilliseconds(long keepAliveInterval) {
+        this.keepAliveInterval = keepAliveInterval;
+    }
+
+    public long getKeepAliveIntervalInMilliseconds() {
+        return this.keepAliveInterval;
+    }
+
+    // For testing purposes
+    void setTickRate(long tickRate) {
+        this.tickRate = tickRate;
+    }
 
     public HubConnection(String url, Transport transport, Logger logger, boolean skipNegotiate, HttpClient client) {
         if (url == null || url.isEmpty()) {
@@ -64,7 +93,7 @@ public class HubConnection {
         this.skipNegotiate = skipNegotiate;
 
         this.callback = (payload) -> {
-
+            resetServerTimeout();
             if (!handshakeReceived) {
                 int handshakeLength = payload.indexOf(RECORD_SEPARATOR) + 1;
                 String handshakeResponseString = payload.substring(0, handshakeLength - 1);
@@ -217,6 +246,26 @@ public class HubConnection {
                             hubConnectionState = HubConnectionState.CONNECTED;
                             connectionState = new ConnectionState(this);
                             logger.log(LogLevel.Information, "HubConnection started.");
+
+                            resetServerTimeout();
+                            this.pingTimer = new Timer();
+                            this.pingTimer.schedule(new TimerTask() {
+                                @Override
+                                public void run() {
+                                    try {
+                                        if (System.currentTimeMillis() > nextServerTimeout) {
+                                            stop("Server timeout elapsed without receiving a message from the server.");
+                                            return;
+                                        }
+
+                                        if (System.currentTimeMillis() > nextPingActivation) {
+                                            sendHubMessage(PingMessage.getInstance());
+                                        }
+                                    } catch (Exception e) {
+                                        pingTimer.cancel();
+                                    }
+                                }
+                            }, new Date(0), tickRate);
                         } finally {
                             hubConnectionStateLock.unlock();
                         }
@@ -276,6 +325,10 @@ public class HubConnection {
             }
         } finally {
             hubConnectionStateLock.unlock();
+        }
+
+        if (pingTimer != null) {
+            pingTimer.cancel();
         }
 
         return transport.stop().whenComplete((i, t) -> {
@@ -363,11 +416,21 @@ public class HubConnection {
     private void sendHubMessage(HubMessage message) throws Exception {
         String serializedMessage = protocol.writeMessage(message);
         if (message.getMessageType() == HubMessageType.INVOCATION) {
-            logger.log(LogLevel.Debug, "Sending %d message '%s'.", message.getMessageType().value, ((InvocationMessage)message).getInvocationId());
+            logger.log(LogLevel.Debug, "Sending %s message '%s'.", message.getMessageType().name(), ((InvocationMessage)message).getInvocationId());
         } else {
-            logger.log(LogLevel.Debug, "Sending %d message.", message.getMessageType().value);
+            logger.log(LogLevel.Debug, "Sending %s message.", message.getMessageType().name());
         }
         transport.send(serializedMessage);
+
+        resetKeepAlive();
+    }
+
+    private void resetServerTimeout() {
+        this.nextServerTimeout = System.currentTimeMillis() + serverTimeout;
+    }
+
+    private void resetKeepAlive() {
+        this.nextPingActivation = System.currentTimeMillis() + keepAliveInterval;
     }
 
     /**
