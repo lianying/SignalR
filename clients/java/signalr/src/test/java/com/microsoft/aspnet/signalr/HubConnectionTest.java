@@ -970,7 +970,7 @@ class HubConnectionTest {
     @Test
     public void connectionTimesOutIfServerDoesNotSendMessage() throws InterruptedException, ExecutionException, TimeoutException, Exception {
         MockTransport mockTransport = new MockTransport();
-        HubConnection hubConnection = new HubConnection("http://example.com", mockTransport, new NullLogger(), true);
+        HubConnection hubConnection = new HubConnection("http://example.com", mockTransport, new NullLogger(), true, new TestHttpClient());
         hubConnection.setServerTimeoutInMilliseconds(1);
         hubConnection.setTickRate(1);
         CompletableFuture<Exception> closedFuture = new CompletableFuture<>();
@@ -986,7 +986,7 @@ class HubConnectionTest {
     @Test
     public void connectionSendsPingsRegularly() throws InterruptedException, ExecutionException, TimeoutException, Exception {
         MockTransport mockTransport = new MockTransport();
-        HubConnection hubConnection = new HubConnection("http://example.com", mockTransport, new NullLogger(), true);
+        HubConnection hubConnection = new HubConnection("http://example.com", mockTransport, new NullLogger(), true, new TestHttpClient());
         hubConnection.setKeepAliveIntervalInMilliseconds(1);
         hubConnection.setTickRate(1);
 
