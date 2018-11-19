@@ -3,15 +3,22 @@ ASP.NET Core SignalR
 
 **IMPORTANT**: This repository hosts code and project management for ASP.NET **Core** SignalR, for use in ASP.NET Core applications using `Microsoft.AspNetCore.App`. If you are looking for information on ASP.NET SignalR (used in .NET Framework applications using System.Web and/or Katana), see the https://github.com/SignalR/SignalR repository.
 
-[![Join the chat at https://gitter.im/aspnet/SignalR](https://badges.gitter.im/aspnet/SignalR.svg)](https://gitter.im/aspnet/SignalR?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)
+[![Build Status](https://dnceng.visualstudio.com/public/_apis/build/status/aspnet/SignalR/SignalR-ci)](https://dnceng.visualstudio.com/public/_build/latest?definitionId=26)
+[![NuGet version](https://badge.fury.io/nu/microsoft.aspnetcore.signalr.svg)](https://badge.fury.io/nu/microsoft.aspnetcore.signalr)
+[![npm version](https://badge.fury.io/js/%40aspnet%2Fsignalr.svg)](https://badge.fury.io/js/%40aspnet%2Fsignalr)
+[![Maven Version](https://maven-badges.herokuapp.com/maven-central/com.microsoft.signalr/signalr/badge.svg)](https://maven-badges.herokuapp.com/maven-central/com.microsoft.signalr/signalr)
 
-Travis:   [![Travis](https://travis-ci.org/aspnet/SignalR.svg?branch=dev)](https://travis-ci.org/aspnet/SignalR)
+[![Join the chat at https://gitter.im/aspnet/SignalR](https://badges.gitter.im/aspnet/SignalR.svg)](https://gitter.im/aspnet/SignalR?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)
 
 ASP.NET Core SignalR is a new library for ASP.NET Core developers that makes it incredibly simple to add real-time web functionality to your applications. What is "real-time web" functionality? It's the ability to have your server-side code push content to the connected clients as it happens, in real-time.
 
 You can watch an introductory presentation here - [ASP.NET Core SignalR: Build 2018](https://www.youtube.com/watch?v=Lws0zOaseIM)
 
 This project is part of ASP.NET Core. You can find samples, documentation and getting started instructions for ASP.NET Core at the [Home](https://github.com/aspnet/home) repo.
+
+## Documentation
+
+Documentation for ASP.NET Core SignalR can be found in the [Real-time Apps](https://docs.microsoft.com/en-us/aspnet/core/signalr/introduction?view=aspnetcore-2.1) section of the ASP.NET Core Documentation site.
 
 ## TypeScript Version
 

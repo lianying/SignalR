@@ -6,6 +6,7 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Threading;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -15,8 +16,8 @@ namespace Microsoft.AspNetCore.SignalR.Redis.Tests
     {
         private static readonly string _exeSuffix = RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? ".exe" : string.Empty;
 
-        private static readonly string _dockerContainerName = "redisTestContainer";
-        private static readonly string _dockerMonitorContainerName = _dockerContainerName + "Monitor";
+        private static readonly string _dockerContainerName = "redisTestContainer-1x";
+        private static readonly string _dockerMonitorContainerName = _dockerContainerName + "Monitor-1x";
         private static readonly Lazy<Docker> _instance = new Lazy<Docker>(Create);
 
         public static Docker Default => _instance.Value;
@@ -70,6 +71,29 @@ namespace Microsoft.AspNetCore.SignalR.Redis.Tests
             return null;
         }
 
+        private void StartRedis(ILogger logger)
+        {
+            try
+            {
+                Run();
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Error starting redis docker container, retrying.");
+                Thread.Sleep(1000);
+                Run();
+            }
+
+            void Run()
+            {
+                // create and run docker container, remove automatically when stopped, map 6379 from the container to 6379 localhost
+                // use static name 'redisTestContainer' so if the container doesn't get removed we don't keep adding more
+                // use redis base docker image
+                // 30 second timeout to allow redis image to be downloaded, should be a rare occurrence, only happening when a new version is released
+                RunProcessAndThrowIfFailed(_path, $"run --rm -p 6380:6379 --name {_dockerContainerName} -d redis", "redis", logger, TimeSpan.FromSeconds(30));
+            }
+        }
+
         public void Start(ILogger logger)
         {
             logger.LogInformation("Starting docker container");
@@ -78,11 +102,7 @@ namespace Microsoft.AspNetCore.SignalR.Redis.Tests
             RunProcessAndWait(_path, $"stop {_dockerMonitorContainerName}", "docker stop", logger, TimeSpan.FromSeconds(15), out var _);
             RunProcessAndWait(_path, $"stop {_dockerContainerName}", "docker stop", logger, TimeSpan.FromSeconds(15), out var output);
 
-            // create and run docker container, remove automatically when stopped, map 6379 from the container to 6379 localhost
-            // use static name 'redisTestContainer' so if the container doesn't get removed we don't keep adding more
-            // use redis base docker image
-            // 20 second timeout to allow redis image to be downloaded, should be a rare occurrence, only happening when a new version is released
-            RunProcessAndThrowIfFailed(_path, $"run --rm -p 6379:6379 --name {_dockerContainerName} -d redis", "redis", logger, TimeSpan.FromSeconds(20));
+            StartRedis(logger);
 
             // inspect the redis docker image and extract the IPAddress. Necessary when running tests from inside a docker container, spinning up a new docker container for redis
             // outside the current container requires linking the networks (difficult to automate) or using the IP:Port combo
@@ -90,7 +110,7 @@ namespace Microsoft.AspNetCore.SignalR.Redis.Tests
             output = output.Trim().Replace(Environment.NewLine, "");
 
             // variable used by Startup.cs
-            Environment.SetEnvironmentVariable("REDIS_CONNECTION", $"{output}:6379");
+            Environment.SetEnvironmentVariable("REDIS_CONNECTION-PREV", $"{output}:6379");
 
             var (monitorProcess, monitorOutput) = RunProcess(_path, $"run -i --name {_dockerMonitorContainerName} --link {_dockerContainerName}:redis --rm redis redis-cli -h redis -p 6379", "redis monitor", logger);
             monitorProcess.StandardInput.WriteLine("MONITOR");
@@ -129,18 +149,21 @@ namespace Microsoft.AspNetCore.SignalR.Redis.Tests
         {
             var (process, lines) = RunProcess(fileName, arguments, prefix, logger);
 
-            if (!process.WaitForExit((int)timeout.TotalMilliseconds))
+            using (process)
             {
-                process.Close();
-                logger.LogError("Closing process '{processName}' because it is running longer than the configured timeout.", fileName);
+                if (!process.WaitForExit((int)timeout.TotalMilliseconds))
+                {
+                    process.Close();
+                    logger.LogError("Closing process '{processName}' because it is running longer than the configured timeout.", fileName);
+                }
+
+                // Need to WaitForExit without a timeout to guarantee the output stream has written everything
+                process.WaitForExit();
+
+                output = string.Join(Environment.NewLine, lines);
+
+                return process.ExitCode;
             }
-
-            // Need to WaitForExit without a timeout to guarantee the output stream has written everything
-            process.WaitForExit();
-
-            output = string.Join(Environment.NewLine, lines);
-
-            return process.ExitCode;
         }
 
         private static (Process, ConcurrentQueue<string>) RunProcess(string fileName, string arguments, string prefix, ILogger logger)
@@ -159,9 +182,7 @@ namespace Microsoft.AspNetCore.SignalR.Redis.Tests
                 EnableRaisingEvents = true
             };
 
-            var exitCode = 0;
             var lines = new ConcurrentQueue<string>();
-            process.Exited += (_, __) => exitCode = process.ExitCode;
             process.OutputDataReceived += (_, a) =>
             {
                 LogIfNotNull(logger.LogInformation, $"'{prefix}' stdout: {{0}}", a.Data);

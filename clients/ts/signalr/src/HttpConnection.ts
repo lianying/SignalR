@@ -39,10 +39,11 @@ const MAX_REDIRECTS = 100;
 let WebSocketModule: any = null;
 let EventSourceModule: any = null;
 if (typeof window === "undefined" && typeof require !== "undefined") {
-    // tslint:disable-next-line:no-var-requires
-    WebSocketModule = require("ws");
-    // tslint:disable-next-line:no-var-requires
-    EventSourceModule = require("eventsource");
+    // In order to ignore the dynamic require in webpack builds we need to do this magic
+    // @ts-ignore: TS doesn't know about these names
+    const requireFunc = typeof __webpack_require__ === "function" ? __non_webpack_require__ : require;
+    WebSocketModule = requireFunc("ws");
+    EventSourceModule = requireFunc("eventsource");
 }
 
 /** @private */
@@ -230,7 +231,7 @@ export class HttpConnection implements IConnection {
         }
 
         const negotiateUrl = this.resolveNegotiateUrl(url);
-        this.logger.log(LogLevel.Debug, `Sending negotiation request: ${negotiateUrl}`);
+        this.logger.log(LogLevel.Debug, `Sending negotiation request: ${negotiateUrl}.`);
         try {
             const response = await this.httpClient.post(negotiateUrl, {
                 content: "",
@@ -299,7 +300,7 @@ export class HttpConnection implements IConnection {
                 if (!this.options.WebSocket) {
                     throw new Error("'WebSocket' is not supported in your environment.");
                 }
-                return new WebSocketTransport(this.accessTokenFactory, this.logger, this.options.logMessageContent || false, this.options.WebSocket);
+                return new WebSocketTransport(this.httpClient, this.accessTokenFactory, this.logger, this.options.logMessageContent || false, this.options.WebSocket);
             case HttpTransportType.ServerSentEvents:
                 if (!this.options.EventSource) {
                     throw new Error("'EventSource' is not supported in your environment.");
@@ -324,7 +325,7 @@ export class HttpConnection implements IConnection {
                         (transport === HttpTransportType.ServerSentEvents && !this.options.EventSource)) {
                         this.logger.log(LogLevel.Debug, `Skipping transport '${HttpTransportType[transport]}' because it is not supported in your environment.'`);
                     } else {
-                        this.logger.log(LogLevel.Debug, `Selecting transport '${HttpTransportType[transport]}'`);
+                        this.logger.log(LogLevel.Debug, `Selecting transport '${HttpTransportType[transport]}'.`);
                         return transport;
                     }
                 } else {

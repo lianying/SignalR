@@ -1,4 +1,4 @@
-import { ChildProcess, execSync, spawn } from "child_process";
+import { ChildProcess, exec, spawn } from "child_process";
 import { EOL } from "os";
 import { Readable } from "stream";
 
@@ -17,6 +17,7 @@ const LOGS_DIR = path.resolve(ARTIFACTS_DIR, "logs");
 
 // Promisify things from fs we want to use.
 const fs = {
+    createWriteStream: _fs.createWriteStream,
     exists: promisify(_fs.exists),
     mkdir: promisify(_fs.mkdir),
 };
@@ -32,11 +33,12 @@ setTimeout(() => {
     process.exit(1);
 }, 1000 * 60 * 10);
 
-function waitForMatch(command: string, process: ChildProcess, regex: RegExp): Promise<RegExpMatchArray> {
-    return new Promise<RegExpMatchArray>((resolve, reject) => {
+function waitForMatches(command: string, process: ChildProcess, regex: RegExp, matchCount: number): Promise<RegExpMatchArray> {
+    return new Promise<string[]>((resolve, reject) => {
         const commandDebug = _debug(`${command}`);
         try {
             let lastLine = "";
+            let results: string[] = null;
 
             async function onData(this: Readable, chunk: string | Buffer): Promise<void> {
                 try {
@@ -49,15 +51,23 @@ function waitForMatch(command: string, process: ChildProcess, regex: RegExp): Pr
                         lastLine = "";
 
                         chunk = chunk.substring(lineEnd + EOL.length);
+                        const res = regex.exec(chunkLine);
+                        if (results == null && res != null) {
+                            results = res;
+                        } else if (res != null) {
+                            results = Array<string>().concat(results, res);
+                        }
 
-                        const results = regex.exec(chunkLine);
-                        commandDebug(chunkLine);
-                        if (results && results.length > 0) {
+                        // * 2 because each match will have the original line plus the match
+                        if (results && results.length >= matchCount * 2) {
                             resolve(results);
                             return;
                         }
+
+                        commandDebug(chunkLine);
                         lineEnd = chunk.indexOf(EOL);
                     }
+
                     lastLine = chunk.toString();
                 } catch (e) {
                     this.removeAllListeners("data");
@@ -110,7 +120,7 @@ for (let i = 2; i < process.argv.length; i += 1) {
             console.log("Running on SauceLabs.");
             break;
         case "-a":
-        case "--all":
+        case "--all-browsers":
             allBrowsers = true;
             break;
         case "--no-color":
@@ -157,35 +167,34 @@ function runKarma(karmaConfig) {
     });
 }
 
-function runJest(url: string) {
+function runJest(httpsUrl: string, httpUrl: string) {
     const jestPath = path.resolve(__dirname, "..", "..", "common", "node_modules", "jest", "bin", "jest.js");
     const configPath = path.resolve(__dirname, "..", "func.jest.config.js");
 
     console.log("Starting Node tests using Jest.");
-    try {
-        execSync(`"${process.execPath}" "${jestPath}" --config "${configPath}"`, { env: { SERVER_URL: url }, timeout: 200000 });
-        return 0;
-    } catch (error) {
-        console.log(error.message);
-        console.log(error.stderr);
-        console.log(error.stdout);
-        return error.status;
-    }
+    return new Promise<number>((resolve, reject) => {
+        const logStream = fs.createWriteStream(path.resolve(__dirname, "..", "..", "..", "..", "artifacts", "logs", "node.functionaltests.log"));
+        // Use NODE_TLS_REJECT_UNAUTHORIZED to allow our test cert to be used by the Node tests (NEVER use this environment variable outside of testing)
+        const p = exec(`"${process.execPath}" "${jestPath}" --config "${configPath}"`, { env: { SERVER_URL: `${httpsUrl};${httpUrl}`, NODE_TLS_REJECT_UNAUTHORIZED: 0 }, timeout: 200000, maxBuffer: 10 * 1024 * 1024 },
+            (error: any, stdout, stderr) => {
+                console.log("Finished Node tests.");
+                if (error) {
+                    console.log(error.message);
+                    return resolve(error.code);
+                }
+                return resolve(0);
+            });
+        p.stdout.pipe(logStream);
+        p.stderr.pipe(logStream);
+    });
 }
 
 (async () => {
     try {
-        // Check if we got any browsers
-        if (config.browsers.length === 0) {
-            console.log("Unable to locate any suitable browsers. Skipping browser functional tests.");
-            process.exit(0);
-            return; // For good measure
-        }
-
         const serverPath = path.resolve(__dirname, "..", "bin", configuration, "netcoreapp2.2", "FunctionalTests.dll");
 
         debug(`Launching Functional Test Server: ${serverPath}`);
-        let desiredServerUrl = "http://127.0.0.1:0";
+        let desiredServerUrl = "https://127.0.0.1:0;http://127.0.0.1:0";
 
         if (sauce) {
             // SauceLabs can only proxy certain ports for Edge and Safari.
@@ -207,15 +216,19 @@ function runJest(url: string) {
             }
         }
 
+        const logStream = fs.createWriteStream(path.resolve(__dirname, "..", "..", "..", "..", "artifacts", "logs", "ts.functionaltests.dotnet.log"));
+        dotnet.stdout.pipe(logStream);
+
         process.on("SIGINT", cleanup);
         process.on("exit", cleanup);
 
         debug("Waiting for Functional Test Server to start");
-        const matches = await waitForMatch("dotnet", dotnet, /Now listening on: (http:\/\/[^\/]+:[\d]+)/);
-        const url = matches[1];
-        debug(`Functional Test Server has started at ${url}`);
+        const matches = await waitForMatches("dotnet", dotnet, /Now listening on: (https?:\/\/[^\/]+:[\d]+)/, 2);
+        const httpsUrl = matches[1];
+        const httpUrl = matches[3];
+        debug(`Functional Test Server has started at ${httpsUrl} and ${httpUrl}`);
 
-        debug(`Using SignalR Server: ${url}`);
+        debug(`Using SignalR Server: ${httpsUrl} and ${httpUrl}`);
 
         // Start karma server
         const conf = {
@@ -237,15 +250,24 @@ function runJest(url: string) {
         }
 
         // Pass server URL to tests
-        conf.client.args = ["--server", url];
+        conf.client.args = ["--server", `${httpsUrl};${httpUrl}`];
 
-        const results = await runKarma(conf);
+        const jestExit = await runJest(httpsUrl, httpUrl);
 
-        const jestExit = runJest(url);
+        // Check if we got any browsers
+        let karmaExit;
+        if (config.browsers.length === 0) {
+            console.log("Unable to locate any suitable browsers. Skipping browser functional tests.");
+        } else {
+            karmaExit = (await runKarma(conf)).exitCode;
+        }
 
-        console.log(`karma exit code: ${results.exitCode}`);
+        if (karmaExit) {
+            console.log(`karma exit code: ${karmaExit}`);
+        }
         console.log(`jest exit code: ${jestExit}`);
-        process.exit(results.exitCode !== 0 ? results.exitCode : jestExit);
+
+        process.exit(jestExit !== 0 ? jestExit : karmaExit);
     } catch (e) {
         console.error(e);
         process.exit(1);

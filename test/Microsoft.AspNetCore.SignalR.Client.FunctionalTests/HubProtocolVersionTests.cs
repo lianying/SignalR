@@ -19,33 +19,26 @@ using Microsoft.Extensions.Logging.Testing;
 using Microsoft.Extensions.Options;
 using Newtonsoft.Json.Linq;
 using Xunit;
-using Xunit.Abstractions;
 
 namespace Microsoft.AspNetCore.SignalR.Client.FunctionalTests
 {
-    // Disable running server tests in parallel so server logs can accurately be captured per test
-    [CollectionDefinition(Name, DisableParallelization = true)]
-    public class HubProtocolVersionTestsCollection : ICollectionFixture<ServerFixture<VersionStartup>>
+    public class HubProtocolVersionTestsCollection : ICollectionFixture<InProcessTestServer<VersionStartup>>
     {
         public const string Name = nameof(HubProtocolVersionTestsCollection);
     }
 
     [Collection(HubProtocolVersionTestsCollection.Name)]
-    public class HubProtocolVersionTests : VerifiableServerLoggedTest
+    public class HubProtocolVersionTests : FunctionalTestBase
     {
-        public HubProtocolVersionTests(ServerFixture<VersionStartup> serverFixture, ITestOutputHelper output) : base(serverFixture, output)
-        {
-        }
-
         [Theory]
         [MemberData(nameof(TransportTypes))]
         public async Task ClientUsingOldCallWithOriginalProtocol(HttpTransportType transportType)
         {
-            using (StartVerifiableLog(out var loggerFactory, $"{nameof(ClientUsingOldCallWithOriginalProtocol)}_{transportType}"))
+            using (StartServer<VersionStartup>(out var server))
             {
                 var connectionBuilder = new HubConnectionBuilder()
-                    .WithLoggerFactory(loggerFactory)
-                    .WithUrl(ServerFixture.Url + "/version", transportType);
+                    .WithLoggerFactory(LoggerFactory)
+                    .WithUrl(server.Url + "/version", transportType);
 
                 var connection = connectionBuilder.Build();
 
@@ -59,7 +52,7 @@ namespace Microsoft.AspNetCore.SignalR.Client.FunctionalTests
                 }
                 catch (Exception ex)
                 {
-                    loggerFactory.CreateLogger<HubConnectionTests>().LogError(ex, "{ExceptionType} from test", ex.GetType().FullName);
+                    LoggerFactory.CreateLogger<HubConnectionTests>().LogError(ex, "{ExceptionType} from test", ex.GetType().FullName);
                     throw;
                 }
                 finally
@@ -73,11 +66,11 @@ namespace Microsoft.AspNetCore.SignalR.Client.FunctionalTests
         [MemberData(nameof(TransportTypes))]
         public async Task ClientUsingOldCallWithNewProtocol(HttpTransportType transportType)
         {
-            using (StartVerifiableLog(out var loggerFactory, $"{nameof(ClientUsingOldCallWithNewProtocol)}_{transportType}"))
+            using (StartServer<VersionStartup>(out var server))
             {
                 var connectionBuilder = new HubConnectionBuilder()
-                    .WithLoggerFactory(loggerFactory)
-                    .WithUrl(ServerFixture.Url + "/version", transportType);
+                    .WithLoggerFactory(LoggerFactory)
+                    .WithUrl(server.Url + "/version", transportType);
                 connectionBuilder.Services.AddSingleton<IHubProtocol>(new VersionedJsonHubProtocol(1000));
 
                 var connection = connectionBuilder.Build();
@@ -92,7 +85,7 @@ namespace Microsoft.AspNetCore.SignalR.Client.FunctionalTests
                 }
                 catch (Exception ex)
                 {
-                    loggerFactory.CreateLogger<HubConnectionTests>().LogError(ex, "{ExceptionType} from test", ex.GetType().FullName);
+                    LoggerFactory.CreateLogger<HubConnectionTests>().LogError(ex, "{ExceptionType} from test", ex.GetType().FullName);
                     throw;
                 }
                 finally
@@ -106,19 +99,19 @@ namespace Microsoft.AspNetCore.SignalR.Client.FunctionalTests
         [MemberData(nameof(TransportTypes))]
         public async Task ClientUsingNewCallWithNewProtocol(HttpTransportType transportType)
         {
-            using (StartVerifiableLog(out var loggerFactory, $"{nameof(ClientUsingNewCallWithNewProtocol)}_{transportType}"))
+            using (StartServer<VersionStartup>(out var server))
             {
                 var httpConnectionFactory = new HttpConnectionFactory(Options.Create(new HttpConnectionOptions
                 {
-                    Url = new Uri(ServerFixture.Url + "/version"),
+                    Url = new Uri(server.Url + "/version"),
                     Transports = transportType
-                }), loggerFactory);
+                }), LoggerFactory);
                 var tcs = new TaskCompletionSource<object>();
 
                 var proxyConnectionFactory = new ProxyConnectionFactory(httpConnectionFactory);
 
                 var connectionBuilder = new HubConnectionBuilder()
-                    .WithLoggerFactory(loggerFactory);
+                    .WithLoggerFactory(LoggerFactory);
                 connectionBuilder.Services.AddSingleton<IHubProtocol>(new VersionedJsonHubProtocol(1000));
                 connectionBuilder.Services.AddSingleton<IConnectionFactory>(proxyConnectionFactory);
 
@@ -149,7 +142,7 @@ namespace Microsoft.AspNetCore.SignalR.Client.FunctionalTests
                 }
                 catch (Exception ex)
                 {
-                    loggerFactory.CreateLogger<HubConnectionTests>().LogError(ex, "{ExceptionType} from test", ex.GetType().FullName);
+                    LoggerFactory.CreateLogger<HubConnectionTests>().LogError(ex, "{ExceptionType} from test", ex.GetType().FullName);
                     throw;
                 }
                 finally
@@ -161,6 +154,7 @@ namespace Microsoft.AspNetCore.SignalR.Client.FunctionalTests
 
         [Theory]
         [MemberData(nameof(TransportTypes))]
+        [LogLevel(LogLevel.Trace)]
         public async Task ClientWithUnsupportedProtocolVersionDoesNotConnect(HttpTransportType transportType)
         {
             bool ExpectedErrors(WriteContext writeContext)
@@ -168,11 +162,11 @@ namespace Microsoft.AspNetCore.SignalR.Client.FunctionalTests
                 return writeContext.LoggerName == typeof(HubConnection).FullName;
             }
 
-            using (StartVerifiableLog(out var loggerFactory, LogLevel.Trace, $"{nameof(ClientWithUnsupportedProtocolVersionDoesNotConnect)}_{transportType}", expectedErrorsFilter: ExpectedErrors))
+            using (StartServer<VersionStartup>(out var server, ExpectedErrors))
             {
                 var connectionBuilder = new HubConnectionBuilder()
-                    .WithLoggerFactory(loggerFactory)
-                    .WithUrl(ServerFixture.Url + "/version", transportType);
+                    .WithLoggerFactory(LoggerFactory)
+                    .WithUrl(server.Url + "/version", transportType);
                 connectionBuilder.Services.AddSingleton<IHubProtocol>(new VersionedJsonHubProtocol(int.MaxValue));
 
                 var connection = connectionBuilder.Build();
@@ -185,7 +179,7 @@ namespace Microsoft.AspNetCore.SignalR.Client.FunctionalTests
                 }
                 catch (Exception ex)
                 {
-                    loggerFactory.CreateLogger<HubConnectionTests>().LogError(ex, "{ExceptionType} from test", ex.GetType().FullName);
+                    LoggerFactory.CreateLogger<HubConnectionTests>().LogError(ex, "{ExceptionType} from test", ex.GetType().FullName);
                     throw;
                 }
                 finally

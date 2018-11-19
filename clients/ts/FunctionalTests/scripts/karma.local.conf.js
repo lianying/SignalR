@@ -41,7 +41,7 @@ try {
 
     // We use the launchers themselves to figure out if the browser exists. It's a bit sneaky, but it works.
     tryAddBrowser("ChromeHeadlessNoSandbox", new ChromeHeadlessBrowser(() => { }, {}));
-    tryAddBrowser("ChromiumHeadless", new ChromiumHeadlessBrowser(() => { }, {}));
+    tryAddBrowser("ChromiumHeadlessIgnoreCert", new ChromiumHeadlessBrowser(() => { }, {}));
     tryAddBrowser("FirefoxHeadless", new FirefoxHeadlessBrowser(0, () => { }, {}));
 
     // We need to receive an argument from the caller, but globals don't seem to work, so we use an environment variable.
@@ -57,8 +57,15 @@ try {
         ChromeHeadlessNoSandbox: {
           base: 'ChromeHeadless',
 
+          // Ignore cert errors to allow our test cert to work (NEVER do this outside of testing)
           // ChromeHeadless runs about 10x slower on Windows 7 machines without the --proxy switches below. Why? ¯\_(ツ)_/¯
-          flags: ["--no-sandbox", "--proxy-server='direct://'", "--proxy-bypass-list=*"]
+          flags: ["--no-sandbox", "--proxy-server='direct://'", "--proxy-bypass-list=*", "--allow-insecure-localhost", "--ignore-certificate-errors"]
+        },
+        ChromiumHeadlessIgnoreCert: {
+          base: 'ChromiumHeadless',
+
+          // Ignore cert errors to allow our test cert to work (NEVER do this outside of testing)
+          flags: ["--allow-insecure-localhost", "--ignore-certificate-errors"]
         }
       },
     });

@@ -37,7 +37,7 @@ export class ServerSentEventsTransport implements ITransport {
         Arg.isRequired(transferFormat, "transferFormat");
         Arg.isIn(transferFormat, TransferFormat, "transferFormat");
 
-        this.logger.log(LogLevel.Trace, "(SSE transport) Connecting");
+        this.logger.log(LogLevel.Trace, "(SSE transport) Connecting.");
 
         // set url before accessTokenFactory because this.url is only for send and we set the auth header instead of the query string for send
         this.url = url;
@@ -56,7 +56,14 @@ export class ServerSentEventsTransport implements ITransport {
                 return;
             }
 
-            const eventSource = new this.eventSourceConstructor(url, { withCredentials: true });
+            let eventSource: EventSource;
+            if (typeof window !== "undefined") {
+                eventSource = new this.eventSourceConstructor(url, { withCredentials: true });
+            } else {
+                // Non-browser passes cookies via the dictionary
+                const cookies = this.httpClient.getCookieString(url);
+                eventSource = new this.eventSourceConstructor(url, { withCredentials: true, headers: { Cookie: cookies } } as EventSourceInit);
+            }
 
             try {
                 eventSource.onmessage = (e: MessageEvent) => {
